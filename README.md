@@ -22,7 +22,7 @@ A modern, responsive stock market dashboard built with React, TypeScript, and Vi
 
 ## Live Demo
 
-[🚀 View Live Demo](https://stock-market-dashboard-serkanby.netlify.app/)
+[🚀 View Live Demo](https://stock-market-dashboarddd.netlify.app/)
 
 ## Screenshots
 
