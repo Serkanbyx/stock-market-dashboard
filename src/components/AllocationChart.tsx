@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { useAppSelector } from '../store/hooks';
 
 // Color palette for chart segments
