@@ -86,6 +86,29 @@ export const Layout = memo(function Layout({ children }: LayoutProps) {
               Data provided by Finnhub. For educational purposes only.
             </p>
           </div>
+          {/* Signature */}
+          <div className="mt-4 pt-4 border-t border-slate-700/30 text-center">
+            <p className="text-sm text-slate-400">
+              Created by{' '}
+              <a
+                href="https://serkanbayraktar.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                Serkanby
+              </a>
+              {' | '}
+              <a
+                href="https://github.com/Serkanbyx"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                Github
+              </a>
+            </p>
+          </div>
         </div>
       </footer>
     </div>
