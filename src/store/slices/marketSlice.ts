@@ -89,12 +89,30 @@ const marketSlice = createSlice({
         state.error = action.payload as string;
       })
       // Fetch top gainers
+      .addCase(fetchTopGainers.pending, (state) => {
+        state.status = 'loading';
+        state.error = null;
+      })
       .addCase(fetchTopGainers.fulfilled, (state, action) => {
+        state.status = 'succeeded';
         state.topGainers = action.payload;
       })
+      .addCase(fetchTopGainers.rejected, (state, action) => {
+        state.status = 'failed';
+        state.error = action.payload as string;
+      })
       // Fetch top losers
+      .addCase(fetchTopLosers.pending, (state) => {
+        state.status = 'loading';
+        state.error = null;
+      })
       .addCase(fetchTopLosers.fulfilled, (state, action) => {
+        state.status = 'succeeded';
         state.topLosers = action.payload;
+      })
+      .addCase(fetchTopLosers.rejected, (state, action) => {
+        state.status = 'failed';
+        state.error = action.payload as string;
       });
   },
 });

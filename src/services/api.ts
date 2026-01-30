@@ -220,6 +220,7 @@ export const stockApi = {
     positive: boolean
   ): Promise<StockQuote[]> {
     const results: StockQuote[] = [];
+    const errors: Error[] = [];
 
     for (const symbol of symbols.slice(0, 5)) {
       try {
@@ -233,9 +234,15 @@ export const stockApi = {
           changePercent,
           change: (quote.price * changePercent) / 100,
         });
-      } catch {
-        // Skip failed requests
+      } catch (error) {
+        errors.push(error instanceof Error ? error : new Error(String(error)));
+        console.warn(`Failed to fetch quote for ${symbol}:`, error);
       }
+    }
+
+    // If all requests failed, throw an error
+    if (results.length === 0 && errors.length > 0) {
+      throw new Error('Failed to fetch stock data. Please check your API key and try again.');
     }
 
     return results.sort((a, b) =>
