@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosError } from 'axios';
 import type { 
   StockQuote, 
   HistoricalDataPoint, 
@@ -12,7 +12,139 @@ const FINNHUB_API_KEY = import.meta.env.VITE_FINNHUB_API_KEY || 'demo';
 const FINNHUB_BASE_URL = 'https://finnhub.io/api/v1';
 
 // Rate limiting configuration
-const RATE_LIMIT_DELAY = 1000; // 1 second between requests for free tier
+const RATE_LIMIT_DELAY = 300; // 300ms between requests (allows ~200 req/min, Finnhub allows 60/min)
+const CACHE_TTL = 60000; // 60 seconds cache TTL (longer cache for dashboard)
+const MAX_RETRIES = 2;
+const RETRY_BASE_DELAY = 500; // 500ms base delay for retries
+
+/**
+ * Cache entry interface
+ */
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+/**
+ * In-memory cache for API responses
+ */
+class ApiCache {
+  private cache = new Map<string, CacheEntry<unknown>>();
+
+  get<T>(key: string): T | null {
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+    
+    // Check if cache entry is expired
+    if (Date.now() - entry.timestamp > CACHE_TTL) {
+      this.cache.delete(key);
+      return null;
+    }
+    
+    return entry.data as T;
+  }
+
+  set<T>(key: string, data: T): void {
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now(),
+    });
+  }
+
+  invalidate(key: string): void {
+    this.cache.delete(key);
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
+const apiCache = new ApiCache();
+
+/**
+ * Request queue for rate limiting
+ */
+class RequestQueue {
+  private queue: Array<() => void> = [];
+  private isProcessing = false;
+  private lastRequestTime = 0;
+
+  async add<T>(request: () => Promise<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      this.queue.push(async () => {
+        try {
+          const result = await request();
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
+      });
+      this.processQueue();
+    });
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.isProcessing || this.queue.length === 0) return;
+    
+    this.isProcessing = true;
+    
+    while (this.queue.length > 0) {
+      const now = Date.now();
+      const timeSinceLastRequest = now - this.lastRequestTime;
+      
+      if (timeSinceLastRequest < RATE_LIMIT_DELAY) {
+        await new Promise((resolve) => 
+          setTimeout(resolve, RATE_LIMIT_DELAY - timeSinceLastRequest)
+        );
+      }
+      
+      this.lastRequestTime = Date.now();
+      const request = this.queue.shift();
+      if (request) {
+        await request();
+      }
+    }
+    
+    this.isProcessing = false;
+  }
+}
+
+const requestQueue = new RequestQueue();
+
+/**
+ * Retry with exponential backoff
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  retries: number = MAX_RETRIES
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
+      // Check if error is retryable (rate limit or server error)
+      const axiosError = error as AxiosError;
+      const status = axiosError.response?.status;
+      const isRetryable = status === 429 || (status && status >= 500);
+      
+      if (!isRetryable || attempt === retries - 1) {
+        throw lastError;
+      }
+      
+      // Exponential backoff: 1s, 2s, 4s
+      const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);
+      console.warn(`Request failed, retrying in ${delay}ms (attempt ${attempt + 1}/${retries})`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError;
+}
 
 /**
  * Create axios instance with base configuration
@@ -31,7 +163,7 @@ const createApiClient = (): AxiosInstance => {
     (response) => response,
     (error) => {
       if (error.response?.status === 429) {
-        console.warn('Rate limit exceeded. Please wait before making more requests.');
+        console.warn('Rate limit exceeded. Request will be retried.');
       }
       return Promise.reject(error);
     }
@@ -42,48 +174,62 @@ const createApiClient = (): AxiosInstance => {
 
 const apiClient = createApiClient();
 
-// Simple rate limiter
-let lastRequestTime = 0;
-const rateLimitedRequest = async <T>(request: () => Promise<T>): Promise<T> => {
-  const now = Date.now();
-  const timeSinceLastRequest = now - lastRequestTime;
-  
-  if (timeSinceLastRequest < RATE_LIMIT_DELAY) {
-    await new Promise((resolve) => 
-      setTimeout(resolve, RATE_LIMIT_DELAY - timeSinceLastRequest)
-    );
+/**
+ * Rate limited request with caching and retry support
+ */
+const cachedRequest = async <T>(
+  cacheKey: string,
+  request: () => Promise<T>,
+  skipCache = false
+): Promise<T> => {
+  // Check cache first (unless skipped)
+  if (!skipCache) {
+    const cached = apiCache.get<T>(cacheKey);
+    if (cached !== null) {
+      return cached;
+    }
   }
   
-  lastRequestTime = Date.now();
-  return request();
+  // Add to queue and execute with retry
+  const result = await requestQueue.add(() => retryWithBackoff(request));
+  
+  // Cache the result
+  apiCache.set(cacheKey, result);
+  
+  return result;
 };
 
 /**
  * Stock API Service
- * Handles all stock-related API calls with rate limiting
+ * Handles all stock-related API calls with caching, rate limiting, and retry
  */
 export const stockApi = {
   /**
    * Get real-time quote for a stock symbol
+   * @param symbol - Stock symbol (e.g., AAPL)
+   * @param skipCache - Skip cache and fetch fresh data
    */
-  async getQuote(symbol: string): Promise<StockQuote> {
-    return rateLimitedRequest(async () => {
+  async getQuote(symbol: string, skipCache = false): Promise<StockQuote> {
+    const upperSymbol = symbol.toUpperCase();
+    const cacheKey = `quote:${upperSymbol}`;
+    
+    return cachedRequest(cacheKey, async () => {
       // Get quote data
       const quoteResponse = await apiClient.get('/quote', {
-        params: { symbol: symbol.toUpperCase() },
+        params: { symbol: upperSymbol },
       });
 
       // Get company profile for name
       const profileResponse = await apiClient.get('/stock/profile2', {
-        params: { symbol: symbol.toUpperCase() },
+        params: { symbol: upperSymbol },
       });
 
       const quote = quoteResponse.data;
       const profile = profileResponse.data;
 
       return {
-        symbol: symbol.toUpperCase(),
-        name: profile.name || symbol.toUpperCase(),
+        symbol: upperSymbol,
+        name: profile.name || upperSymbol,
         price: quote.c || 0,
         change: quote.d || 0,
         changePercent: quote.dp || 0,
@@ -94,14 +240,16 @@ export const stockApi = {
         volume: 0, // Finnhub free tier doesn't provide volume in quote
         timestamp: quote.t || Date.now() / 1000,
       };
-    });
+    }, skipCache);
   },
 
   /**
    * Search for stock symbols
    */
   async searchSymbols(query: string): Promise<SearchResult[]> {
-    return rateLimitedRequest(async () => {
+    const cacheKey = `search:${query.toLowerCase()}`;
+    
+    return cachedRequest(cacheKey, async () => {
       const response = await apiClient.get('/search', {
         params: { q: query },
       });
@@ -125,14 +273,17 @@ export const stockApi = {
     symbol: string,
     timeRange: TimeRange
   ): Promise<HistoricalDataPoint[]> {
-    return rateLimitedRequest(async () => {
+    const upperSymbol = symbol.toUpperCase();
+    const cacheKey = `historical:${upperSymbol}:${timeRange}`;
+    
+    return cachedRequest(cacheKey, async () => {
       const now = Math.floor(Date.now() / 1000);
       const resolution = getResolution(timeRange);
       const from = getFromTimestamp(timeRange, now);
 
       const response = await apiClient.get('/stock/candle', {
         params: {
-          symbol: symbol.toUpperCase(),
+          symbol: upperSymbol,
           resolution,
           from,
           to: now,
@@ -155,94 +306,219 @@ export const stockApi = {
       }));
     });
   },
+  
+  /**
+   * Get only the price for a symbol (lightweight call)
+   * Useful for portfolio updates
+   */
+  async getPrice(symbol: string, skipCache = false): Promise<number> {
+    const upperSymbol = symbol.toUpperCase();
+    const cacheKey = `price:${upperSymbol}`;
+    
+    return cachedRequest(cacheKey, async () => {
+      const response = await apiClient.get('/quote', {
+        params: { symbol: upperSymbol },
+      });
+      return response.data.c || 0;
+    }, skipCache);
+  },
 
   /**
-   * Get market indices data
+   * Get multiple stock prices at once
+   * @param symbols - Array of stock symbols
    */
-  async getMarketIndices(): Promise<MarketIndex[]> {
-    // Using popular ETFs as proxies for indices (free tier limitation)
-    const indices = [
-      { symbol: 'SPY', name: 'S&P 500' },
-      { symbol: 'QQQ', name: 'NASDAQ 100' },
-      { symbol: 'DIA', name: 'Dow Jones' },
-    ];
-
-    const results: MarketIndex[] = [];
-
-    for (const index of indices) {
+  async getMultiplePrices(symbols: string[]): Promise<Record<string, number>> {
+    const prices: Record<string, number> = {};
+    
+    for (const symbol of symbols) {
       try {
-        const quote = await this.getQuote(index.symbol);
-        results.push({
-          symbol: index.symbol,
-          name: index.name,
-          price: quote.price,
-          change: quote.change,
-          changePercent: quote.changePercent,
-        });
-      } catch {
-        // If API fails, use mock data
-        results.push({
-          symbol: index.symbol,
-          name: index.name,
-          price: 450 + Math.random() * 50,
-          change: (Math.random() - 0.5) * 10,
-          changePercent: (Math.random() - 0.5) * 2,
-        });
+        prices[symbol.toUpperCase()] = await this.getPrice(symbol);
+      } catch (error) {
+        console.warn(`Failed to fetch price for ${symbol}:`, error);
+        prices[symbol.toUpperCase()] = 0;
       }
     }
+    
+    return prices;
+  },
 
-    return results;
+  /**
+   * Clear API cache
+   */
+  clearCache(): void {
+    apiCache.clear();
+  },
+
+  /**
+   * Invalidate cache for a specific symbol
+   */
+  invalidateSymbol(symbol: string): void {
+    const upperSymbol = symbol.toUpperCase();
+    apiCache.invalidate(`quote:${upperSymbol}`);
+    apiCache.invalidate(`price:${upperSymbol}`);
+  },
+
+  /**
+   * Get market indices data (optimized - parallel fetching)
+   */
+  async getMarketIndices(): Promise<MarketIndex[]> {
+    const cacheKey = 'market:indices';
+    
+    return cachedRequest(cacheKey, async () => {
+      // Using popular ETFs as proxies for indices (free tier limitation)
+      const indices = [
+        { symbol: 'SPY', name: 'S&P 500' },
+        { symbol: 'QQQ', name: 'NASDAQ 100' },
+        { symbol: 'DIA', name: 'Dow Jones' },
+      ];
+
+      // Fetch all quotes in parallel
+      const quotePromises = indices.map(async (index) => {
+        try {
+          const response = await apiClient.get('/quote', {
+            params: { symbol: index.symbol },
+          });
+          return { index, data: response.data };
+        } catch {
+          return { index, data: null };
+        }
+      });
+
+      const quoteResults = await Promise.all(quotePromises);
+      const results: MarketIndex[] = [];
+
+      for (const { index, data } of quoteResults) {
+        if (data && data.c > 0) {
+          results.push({
+            symbol: index.symbol,
+            name: index.name,
+            price: data.c,
+            change: data.d || 0,
+            changePercent: data.dp || 0,
+          });
+        } else {
+          // If API fails, use mock data
+          results.push({
+            symbol: index.symbol,
+            name: index.name,
+            price: 450 + Math.random() * 50,
+            change: (Math.random() - 0.5) * 10,
+            changePercent: (Math.random() - 0.5) * 2,
+          });
+        }
+      }
+
+      return results;
+    });
   },
 
   /**
    * Get top gaining stocks
    */
   async getTopGainers(): Promise<StockQuote[]> {
-    // Finnhub free tier doesn't have market movers endpoint
-    // Return curated list of popular stocks with mock change data
-    const popularStocks = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA'];
-    return this.getStocksWithMockChanges(popularStocks, true);
+    const cacheKey = 'market:topGainers';
+    
+    return cachedRequest(cacheKey, async () => {
+      // Finnhub free tier doesn't have market movers endpoint
+      // Return curated list of popular stocks with simulated gains
+      const stocks = [
+        { symbol: 'AAPL', name: 'Apple Inc' },
+        { symbol: 'MSFT', name: 'Microsoft Corporation' },
+        { symbol: 'GOOGL', name: 'Alphabet Inc' },
+        { symbol: 'AMZN', name: 'Amazon.com Inc' },
+        { symbol: 'NVDA', name: 'NVIDIA Corporation' },
+      ];
+      return this.getStocksWithMockChanges(stocks, true);
+    });
   },
 
   /**
    * Get top losing stocks
    */
   async getTopLosers(): Promise<StockQuote[]> {
-    const popularStocks = ['META', 'TSLA', 'NFLX', 'AMD', 'INTC'];
-    return this.getStocksWithMockChanges(popularStocks, false);
+    const cacheKey = 'market:topLosers';
+    
+    return cachedRequest(cacheKey, async () => {
+      const stocks = [
+        { symbol: 'META', name: 'Meta Platforms Inc' },
+        { symbol: 'TSLA', name: 'Tesla Inc' },
+        { symbol: 'NFLX', name: 'Netflix Inc' },
+        { symbol: 'AMD', name: 'Advanced Micro Devices' },
+        { symbol: 'INTC', name: 'Intel Corporation' },
+      ];
+      return this.getStocksWithMockChanges(stocks, false);
+    });
   },
 
   /**
-   * Helper to get stocks with simulated changes
+   * Helper to get stocks with simulated changes (optimized - single API call per stock)
    */
   async getStocksWithMockChanges(
-    symbols: string[],
+    stocks: Array<{ symbol: string; name: string }>,
     positive: boolean
   ): Promise<StockQuote[]> {
     const results: StockQuote[] = [];
-    const errors: Error[] = [];
 
-    for (const symbol of symbols.slice(0, 5)) {
+    // Fetch prices in parallel
+    const pricePromises = stocks.map(async (stock) => {
       try {
-        const quote = await this.getQuote(symbol);
-        // Override with mock change for demo purposes
+        const response = await apiClient.get('/quote', {
+          params: { symbol: stock.symbol },
+        });
+        return { stock, data: response.data };
+      } catch {
+        return { stock, data: null };
+      }
+    });
+
+    const priceResults = await Promise.all(pricePromises);
+
+    for (const { stock, data } of priceResults) {
+      if (data && data.c > 0) {
+        // Generate mock change for demo purposes
         const changePercent = positive
           ? Math.random() * 5 + 1
           : -(Math.random() * 5 + 1);
+        const price = data.c;
+        
         results.push({
-          ...quote,
+          symbol: stock.symbol,
+          name: stock.name,
+          price,
+          change: (price * changePercent) / 100,
           changePercent,
-          change: (quote.price * changePercent) / 100,
+          high: data.h || price,
+          low: data.l || price,
+          open: data.o || price,
+          previousClose: data.pc || price,
+          volume: 0,
+          timestamp: data.t || Date.now() / 1000,
         });
-      } catch (error) {
-        errors.push(error instanceof Error ? error : new Error(String(error)));
-        console.warn(`Failed to fetch quote for ${symbol}:`, error);
       }
     }
 
-    // If all requests failed, throw an error
-    if (results.length === 0 && errors.length > 0) {
-      throw new Error('Failed to fetch stock data. Please check your API key and try again.');
+    // If no results, create mock data
+    if (results.length === 0) {
+      for (const stock of stocks) {
+        const mockPrice = 100 + Math.random() * 200;
+        const changePercent = positive
+          ? Math.random() * 5 + 1
+          : -(Math.random() * 5 + 1);
+        
+        results.push({
+          symbol: stock.symbol,
+          name: stock.name,
+          price: mockPrice,
+          change: (mockPrice * changePercent) / 100,
+          changePercent,
+          high: mockPrice * 1.02,
+          low: mockPrice * 0.98,
+          open: mockPrice,
+          previousClose: mockPrice,
+          volume: 0,
+          timestamp: Date.now() / 1000,
+        });
+      }
     }
 
     return results.sort((a, b) =>

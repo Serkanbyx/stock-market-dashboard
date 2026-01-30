@@ -13,6 +13,7 @@ interface LayoutProps {
 export const Layout = memo(function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const isHomePage = location.pathname === '/';
+  const isPortfolioPage = location.pathname === '/portfolio';
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -62,6 +63,16 @@ export const Layout = memo(function Layout({ children }: LayoutProps) {
                 }`}
               >
                 Dashboard
+              </Link>
+              <Link
+                to="/portfolio"
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  isPortfolioPage
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                Portfolio
               </Link>
             </nav>
           </div>

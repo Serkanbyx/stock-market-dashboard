@@ -2,16 +2,18 @@ import { configureStore } from '@reduxjs/toolkit';
 import stockReducer from './slices/stockSlice';
 import watchlistReducer from './slices/watchlistSlice';
 import marketReducer from './slices/marketSlice';
+import portfolioReducer from './slices/portfolioSlice';
 
 /**
  * Redux Store Configuration
- * Combines all slices: stock, watchlist, and market data
+ * Combines all slices: stock, watchlist, market, and portfolio data
  */
 export const store = configureStore({
   reducer: {
     stock: stockReducer,
     watchlist: watchlistReducer,
     market: marketReducer,
+    portfolio: portfolioReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

@@ -114,3 +114,42 @@ export interface ChartDataPoint {
   low?: number;
   close?: number;
 }
+
+// Portfolio holding - owned stock position
+export interface PortfolioHolding {
+  symbol: string;
+  name: string;
+  shares: number;
+  averageCost: number;
+  totalCost: number;
+}
+
+// Transaction - buy/sell operation
+export interface Transaction {
+  id: string;
+  type: 'buy' | 'sell';
+  symbol: string;
+  name: string;
+  shares: number;
+  price: number;
+  total: number;
+  timestamp: number;
+}
+
+// Portfolio state for Redux store
+export interface PortfolioState {
+  holdings: PortfolioHolding[];
+  transactions: Transaction[];
+  cashBalance: number;
+  initialBalance: number;
+  currentPrices: Record<string, number>;
+  status: ApiStatus;
+  error: string | null;
+}
+
+// Transaction form data
+export interface TransactionFormData {
+  symbol: string;
+  shares: number;
+  type: 'buy' | 'sell';
+}

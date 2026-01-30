@@ -2,10 +2,11 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { StockDetail } from './pages/StockDetail';
+import Portfolio from './pages/Portfolio';
 
 /**
  * Main Application Component
- * Handles routing between Dashboard and Stock Detail pages
+ * Handles routing between Dashboard, Portfolio, and Stock Detail pages
  */
 function App() {
   return (
@@ -13,6 +14,9 @@ function App() {
       <Routes>
         {/* Dashboard - Main landing page */}
         <Route path="/" element={<Dashboard />} />
+        
+        {/* Portfolio - Virtual portfolio management */}
+        <Route path="/portfolio" element={<Portfolio />} />
         
         {/* Stock Detail - Individual stock analysis */}
         <Route path="/stock/:symbol" element={<StockDetail />} />
