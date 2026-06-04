@@ -41,12 +41,10 @@ export const StockDetail = memo(function StockDetail() {
     (item) => item.symbol === symbol?.toUpperCase()
   );
 
-  // Fetch stock data on mount and symbol change
+  // Fetch stock quote on mount and symbol change
   useEffect(() => {
     if (symbol) {
-      const upperSymbol = symbol.toUpperCase();
-      dispatch(fetchStockQuote(upperSymbol));
-      dispatch(fetchHistoricalData({ symbol: upperSymbol, timeRange }));
+      dispatch(fetchStockQuote(symbol.toUpperCase()));
     }
 
     // Cleanup on unmount
@@ -55,12 +53,12 @@ export const StockDetail = memo(function StockDetail() {
     };
   }, [symbol, dispatch]);
 
-  // Fetch new historical data when time range changes
+  // Fetch historical data on symbol or time range change
   useEffect(() => {
-    if (symbol && selectedStock) {
+    if (symbol) {
       dispatch(fetchHistoricalData({ symbol: symbol.toUpperCase(), timeRange }));
     }
-  }, [timeRange, symbol, selectedStock, dispatch]);
+  }, [symbol, timeRange, dispatch]);
 
   // Handle time range change
   const handleTimeRangeChange = useCallback(

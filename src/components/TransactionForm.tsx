@@ -89,26 +89,6 @@ export const TransactionForm = memo(function TransactionForm({
     return Math.floor(cashBalance / currentPrice);
   }, [cashBalance, currentPrice]);
 
-  // Reset form when modal opens/closes or mode changes
-  useEffect(() => {
-    if (isOpen) {
-      reset({
-        symbol: prefilledHolding?.symbol || '',
-        shares: 1,
-      });
-      setCurrentPrice(null);
-      setStockName(prefilledHolding?.name || '');
-      setPriceError(null);
-      setSelectedSymbol(prefilledHolding?.symbol || '');
-      dispatch(clearError());
-      
-      // If prefilled, fetch the current price
-      if (prefilledHolding) {
-        fetchPrice(prefilledHolding.symbol);
-      }
-    }
-  }, [isOpen, mode, prefilledHolding, reset, dispatch]);
-
   // Fetch price for a symbol
   const fetchPrice = useCallback(async (symbol: string) => {
     if (!symbol || symbol.length < 1) {
@@ -147,6 +127,26 @@ export const TransactionForm = memo(function TransactionForm({
       setIsLoadingPrice(false);
     }
   }, []);
+
+  // Reset form when modal opens/closes or mode changes
+  useEffect(() => {
+    if (isOpen) {
+      reset({
+        symbol: prefilledHolding?.symbol || '',
+        shares: 1,
+      });
+      setCurrentPrice(null);
+      setStockName(prefilledHolding?.name || '');
+      setPriceError(null);
+      setSelectedSymbol(prefilledHolding?.symbol || '');
+      dispatch(clearError());
+      
+      // If prefilled, fetch the current price
+      if (prefilledHolding) {
+        fetchPrice(prefilledHolding.symbol);
+      }
+    }
+  }, [isOpen, mode, prefilledHolding, reset, dispatch, fetchPrice]);
 
   // Auto-fetch price when debounced symbol changes
   useEffect(() => {

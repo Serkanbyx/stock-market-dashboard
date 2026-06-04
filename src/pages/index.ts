@@ -5,3 +5,4 @@
 
 export { Dashboard } from './Dashboard';
 export { StockDetail } from './StockDetail';
+export { default as Portfolio } from './Portfolio';
