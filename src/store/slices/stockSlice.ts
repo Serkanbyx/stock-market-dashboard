@@ -114,15 +114,20 @@ const stockSlice = createSlice({
       })
       // Fetch historical data
       .addCase(fetchHistoricalData.pending, (state) => {
-        state.status = 'loading';
+        if (!state.selectedStock) {
+          state.status = 'loading';
+        }
       })
       .addCase(fetchHistoricalData.fulfilled, (state, action) => {
         state.status = 'succeeded';
         state.historicalData = action.payload;
+        state.error = null;
       })
       .addCase(fetchHistoricalData.rejected, (state, action) => {
-        state.status = 'failed';
-        state.error = action.payload as string;
+        if (!state.selectedStock) {
+          state.status = 'failed';
+          state.error = action.payload as string;
+        }
       })
       // Search stocks
       .addCase(searchStocks.pending, (state) => {

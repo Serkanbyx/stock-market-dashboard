@@ -281,29 +281,34 @@ export const stockApi = {
       const resolution = getResolution(timeRange);
       const from = getFromTimestamp(timeRange, now);
 
-      const response = await apiClient.get('/stock/candle', {
-        params: {
-          symbol: upperSymbol,
-          resolution,
-          from,
-          to: now,
-        },
-      });
+      try {
+        const response = await apiClient.get('/stock/candle', {
+          params: {
+            symbol: upperSymbol,
+            resolution,
+            from,
+            to: now,
+          },
+        });
 
-      const data = response.data;
-      
-      if (data.s === 'no_data' || !data.c) {
+        const data = response.data;
+
+        if (data.s === 'no_data' || !data.c) {
+          return generateMockHistoricalData(timeRange);
+        }
+
+        return data.c.map((close: number, index: number) => ({
+          date: new Date(data.t[index] * 1000).toISOString().split('T')[0],
+          open: data.o[index],
+          high: data.h[index],
+          low: data.l[index],
+          close: close,
+          volume: data.v[index],
+        }));
+      } catch {
+        // Free tier may block candle data (403); fall back to mock chart data
         return generateMockHistoricalData(timeRange);
       }
-
-      return data.c.map((close: number, index: number) => ({
-        date: new Date(data.t[index] * 1000).toISOString().split('T')[0],
-        open: data.o[index],
-        high: data.h[index],
-        low: data.l[index],
-        close: close,
-        volume: data.v[index],
-      }));
     });
   },
   

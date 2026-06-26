@@ -32,13 +32,19 @@ A modern, responsive stock market dashboard built with React, TypeScript, and Vi
 
 The main dashboard displays the market overview, watchlist, and top movers at a glance.
 
+![Dashboard View](docs/screenshots/dashboard.png)
+
 ### Stock Detail View
 
 Detailed stock analysis with interactive price charts, key statistics, and quick actions.
 
+![Stock Detail View](docs/screenshots/stock-detail.png)
+
 ### Portfolio View
 
 A simulated portfolio with holdings, allocation chart, transaction history, and live profit/loss tracking.
+
+![Portfolio View](docs/screenshots/portfolio.png)
 
 ## Technologies
 
